@@ -9,8 +9,10 @@ import {
   type ContractKey,
   DERIV_TYPE,
   getState,
+  HAS_PREDICTION,
   marketName,
   setState,
+  subscribeStore,
   type Trade,
 } from "./store";
 
@@ -62,10 +64,26 @@ function wireFeed() {
     if (loop) queueMicrotask(() => void tickLoop());
   };
   feed.onError = (msg) => addError(msg);
+  // re-sync the live feed whenever the selected market(s) change
+  let lastKey = "";
+  subscribeStore(() => {
+    const st = getState();
+    const key = [st.settings.market, st.engine.market, st.settings.multiMarket, st.settings.markets.join(",")].join("|");
+    if (key !== lastKey) {
+      lastKey = key;
+      syncFeed();
+    }
+  });
+}
+
+/** Start streaming live prices as soon as the app opens (no token needed). */
+export function startFeed() {
+  syncFeed();
 }
 
 /** Keep the live feed subscribed to every market the UI or the AI needs. */
 export function syncFeed() {
+  if (typeof window === "undefined") return;
   wireFeed();
   const st = getState().settings;
   const syms = new Set<string>([st.market, getState().engine.market]);
@@ -158,7 +176,11 @@ export function launchEngine() {
   eng({ market: markets[0]!, status: "Scanning markets", cooldownUntil: null });
   setState((st) => ({ session: { ...st.session, launched: true } }));
   syncFeed();
-  addLog(`Megatron AI launched — analysing ${markets.map(marketName).join(", ")}`);
+  addLog(
+    s.settings.analysis
+      ? `Megatron AI launched — analysing ${markets.map(marketName).join(", ")}`
+      : `Megatron AI launched — No Analysis mode, trading ${markets.map(marketName).join(", ")} immediately`,
+  );
   curHour = -1;
   if (loop) clearInterval(loop);
   loop = setInterval(tickLoop, 1000);
@@ -242,8 +264,11 @@ async function tickLoop() {
     if (now - lastScanLog > 1000) {
       lastScanLog = now;
       const m = getState().engine.market;
-      const ready = (priceBuf[m]?.digits.length ?? 0) >= 50;
-      eng({ status: ready ? "Analysing · waiting for entry" : `Loading data for ${marketName(m)}`, signal: "" });
+      const ready = st.analysis ? (priceBuf[m]?.digits.length ?? 0) >= 50 : lastPrice[m] !== undefined;
+      eng({
+        status: !ready ? `Loading data for ${marketName(m)}` : st.analysis ? "Analysing · waiting for entry" : "Waiting for eligible contract",
+        signal: "",
+      });
     }
     return;
   }
@@ -269,6 +294,12 @@ async function tickLoop() {
 /** Scan active markets and return the best one with live entry signals. */
 function findSignal(): { symbol: string; cands: Signal[] } | null {
   const st = getState().settings;
+  if (!st.analysis) {
+    const m = getState().engine.market;
+    if (lastPrice[m] === undefined) return null;
+    const cands = noAnalysisSignals().filter(eligible);
+    return cands.length ? { symbol: m, cands } : null;
+  }
   const auto = st.multiMarket && st.marketMode === "auto";
   const markets = auto ? activeMarkets() : [getState().engine.market];
   let best: { symbol: string; cands: Signal[]; edge: number } | null = null;
@@ -287,6 +318,24 @@ function findSignal(): { symbol: string; cands: Signal[] } | null {
     marketTrades = 0;
   }
   return best;
+}
+
+/** No-analysis mode: every enabled contract is an immediate candidate. */
+function noAnalysisSignals(): Signal[] {
+  const c = getState().settings.contracts;
+  const out: Signal[] = [];
+  for (const k of CONTRACTS) {
+    if (!c[k].enabled) continue;
+    if (HAS_PREDICTION.includes(k)) {
+      const preds = c[k].predMode === "single" ? c[k].preds.slice(0, 1) : c[k].preds;
+      for (const d of preds) {
+        if ((k === "OVER" && d >= 9) || (k === "UNDER" && d <= 0)) continue;
+        const prob = k === "OVER" ? (9 - d) / 10 : k === "UNDER" ? d / 10 : 0.9;
+        out.push({ type: k, pred: d, prob, edge: 0.01, reason: "no analysis — direct entry" });
+      }
+    } else out.push({ type: k, prob: 0.5, edge: 0.01, reason: "no analysis — direct entry" });
+  }
+  return out;
 }
 
 function eligible(c: Signal) {

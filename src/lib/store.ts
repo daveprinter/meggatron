@@ -60,6 +60,7 @@ export interface Settings {
   recoveryMode: "same" | "different" | "auto";
   recoveryCoverage: number; // percent
   tradeSpeed: "normal" | "tick";
+  analysis: boolean; // false = "No Analysis": enter immediately on launch
 }
 
 export interface Trade {
@@ -126,6 +127,7 @@ export const defaultSettings: Settings = {
   recoveryMode: "auto",
   recoveryCoverage: 80,
   tradeSpeed: "normal",
+  analysis: true,
 };
 
 let state: AppState = {
