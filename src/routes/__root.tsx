@@ -14,6 +14,7 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { getState, hydrate, nairobiTime, useApp } from "../lib/store";
 import { connectAccount, resumeIfLaunched, startFeed } from "../lib/engine";
+import { startPayoutScanner } from "../lib/payouts";
 
 function NotFoundComponent() {
   return (
@@ -115,6 +116,7 @@ function RootComponent() {
   useEffect(() => {
     hydrate();
     startFeed();
+    startPayoutScanner();
     if (getState().settings.token) connectAccount().then(resumeIfLaunched);
   }, []);
 
@@ -139,6 +141,7 @@ function RootComponent() {
             [
               ["/", "Home"],
               ["/settings", "Settings"],
+              ["/payouts", "Payouts"],
               ["/history", "History"],
             ] as const
           ).map(([to, label]) => (
