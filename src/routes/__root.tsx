@@ -14,6 +14,9 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { getState, hydrate, nairobiTime, useApp } from "../lib/store";
 import { connectAccount, resumeIfLaunched } from "../lib/engine";
+import { supabase } from "@/integrations/supabase/client";
+import { startCloudSync, stopCloudSync } from "../lib/cloud";
+import { AuthScreen } from "../components/AuthScreen";
 
 function NotFoundComponent() {
   return (
@@ -111,11 +114,23 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const launched = useApp((s) => s.session.launched);
   const conn = useApp((s) => s.conn.status);
+  const [user, setUser] = useState<{ id: string; email?: string } | null | undefined>(undefined);
 
   useEffect(() => {
     hydrate();
     if (getState().settings.token) connectAccount().then(resumeIfLaunched);
+    supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => setUser(session?.user ?? null));
+    return () => sub.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (user) startCloudSync(user.id);
+    else if (user === null) stopCloudSync();
+  }, [user?.id, user]);
+
+  if (user === undefined) return <div className="min-h-screen" />;
+  if (user === null) return <AuthScreen />;
 
   const tab = "flex flex-1 flex-col items-center gap-0.5 py-2.5 text-xs font-semibold text-muted-foreground";
   return (
@@ -126,7 +141,10 @@ function RootComponent() {
             <span className={`h-2.5 w-2.5 rounded-full ${launched ? "animate-pulse bg-success" : conn === "connected" ? "bg-accent" : "bg-muted-foreground"}`} />
             <span className="font-display text-lg font-bold tracking-wider glow-text">MEGATRON AI</span>
           </div>
-          <Clock />
+          <div className="flex items-center gap-3">
+            <Clock />
+            <button onClick={() => supabase.auth.signOut()} className="text-xs text-muted-foreground underline">Sign out</button>
+          </div>
         </header>
         <main className="space-y-4 p-4">
           <Outlet />
