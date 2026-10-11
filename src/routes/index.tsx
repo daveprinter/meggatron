@@ -87,7 +87,7 @@ function Home() {
           value={s.market}
           onChange={(e) => {
             updateSettings({ market: e.target.value });
-            if (conn.status === "connected") watchMarket(e.target.value);
+            watchMarket(e.target.value);
           }}
         >
           {MARKETS.map((m) => (
@@ -132,7 +132,8 @@ function Home() {
                       updateSettings({ markets: on ? s.markets.filter((x) => x !== m.symbol) : [...s.markets, m.symbol] })
                     }
                   >
-                    {m.name}
+                    <div>{m.name}</div>
+                    {on && <MarketPrice symbol={m.symbol} />}
                   </button>
                 );
               })}
