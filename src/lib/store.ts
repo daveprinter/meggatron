@@ -227,6 +227,12 @@ const subscribe = (l: () => void) => {
   listeners.add(l);
   return () => listeners.delete(l);
 };
+export const subscribeStore = (l: () => void) => {
+  listeners.add(l);
+  return () => {
+    listeners.delete(l);
+  };
+};
 export function useApp<T>(sel: (s: AppState) => T): T {
   return useSyncExternalStore(
     subscribe,
