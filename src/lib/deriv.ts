@@ -62,7 +62,7 @@ export class DerivClient {
   private pending = new Map<number, { res: (m: Msg) => void; rej: (e: Error) => void }>();
   private listeners = new Set<Listener>();
   private pingTimer: ReturnType<typeof setInterval> | null = null;
-  mode: TokenMode = "legacy";
+  mode: TokenMode = "pat";
   private lastMsgAt = 0;
   private watchdog: ReturnType<typeof setInterval> | null = null;
 
@@ -80,7 +80,18 @@ export class DerivClient {
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(url);
       this.ws = ws;
+      let settled = false;
+      const openTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        ws.onclose = null;
+        try { ws.close(); } catch {}
+        if (this.ws === ws) this.ws = null;
+        reject(new Error("Deriv connection timed out"));
+      }, 12000);
       ws.onopen = () => {
+        settled = true;
+        clearTimeout(openTimer);
         this.lastMsgAt = Date.now();
         if (this.pingTimer) clearInterval(this.pingTimer);
         if (this.watchdog) clearInterval(this.watchdog);
@@ -90,8 +101,14 @@ export class DerivClient {
           if (this.ws === ws && Date.now() - this.lastMsgAt > 60000) ws.close();
         }, 10000);
         resolve();
+        this.listeners.forEach((l) => l({ msg_type: "__open" }));
       };
-      ws.onerror = () => reject(new Error("Connection to Deriv failed"));
+      ws.onerror = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(openTimer);
+        reject(new Error("Connection to Deriv failed"));
+      };
       ws.onclose = () => {
         if (this.ws !== ws) return;
         if (this.pingTimer) clearInterval(this.pingTimer);
@@ -120,7 +137,13 @@ export class DerivClient {
     if (!this.open) throw new Error("Not connected");
     const req_id = this.reqId++;
     return new Promise((res, rej) => {
-      this.pending.set(req_id, { res, rej });
+      const t = setTimeout(() => {
+        if (this.pending.delete(req_id)) rej(new Error("Deriv did not respond in time"));
+      }, 20000);
+      this.pending.set(req_id, {
+        res: (m) => { clearTimeout(t); res(m); },
+        rej: (e) => { clearTimeout(t); rej(e); },
+      });
       this.ws!.send(JSON.stringify({ ...req, req_id }));
     });
   }
@@ -185,17 +208,8 @@ export class DerivClient {
   async connect(rawToken: string): Promise<DerivAuthResult> {
     const token = rawToken.trim();
     if (!token) throw new Error("Empty token");
-    // Try legacy first; if the token isn't a legacy API token, fall back to PAT.
-    try {
-      return await this.connectLegacy(token);
-    } catch (legacyErr: any) {
-      this.disconnect();
-      try {
-        return await this.connectPat(token);
-      } catch (patErr: any) {
-        throw new Error(patErr?.message || legacyErr?.message || "Could not connect to Deriv");
-      }
-    }
+    // Single authenticated API connection only (no public/1089 socket).
+    return await this.connectPat(token);
   }
 
   disconnect() {
