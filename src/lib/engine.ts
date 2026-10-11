@@ -2,7 +2,7 @@ import { deriv } from "./deriv";
 import { feed } from "./feed";
 import { startKeepAlive, stopKeepAlive } from "./keepalive";
 import { coverage, estProfitRatio, martingaleStake, MIN_STAKE, round2 } from "./martingale";
-import { learnFromTrade, payoutRatio, quote } from "./payouts";
+import { learnFromTrade, payoutRatio } from "./payouts";
 import { analyse, type Signal } from "./signals";
 import {
   addError,
