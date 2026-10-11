@@ -107,6 +107,11 @@ function wireAccount() {
     if (m.msg_type === "__closed") {
       setState(() => ({ conn: { status: "idle", error: "Disconnected" } }));
       addError("Deriv account connection closed");
+      // auto-reconnect while a session is running (e.g. after the phone was minimised)
+      if (getState().session.launched && getState().settings.token)
+        setTimeout(() => {
+          if (getState().session.launched && getState().conn.status !== "connected") void connectAccount();
+        }, 3000);
     }
     if (m.error && m.msg_type !== "ping") addError(`Deriv API: ${m.error.message}`);
   });
