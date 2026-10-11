@@ -63,6 +63,8 @@ export class DerivClient {
   private listeners = new Set<Listener>();
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   mode: TokenMode = "legacy";
+  private lastMsgAt = 0;
+  private watchdog: ReturnType<typeof setInterval> | null = null;
 
   onMessage(l: Listener) {
     this.listeners.add(l);
@@ -79,15 +81,29 @@ export class DerivClient {
       const ws = new WebSocket(url);
       this.ws = ws;
       ws.onopen = () => {
-        this.pingTimer = setInterval(() => this.send({ ping: 1 }).catch(() => {}), 25000);
+        this.lastMsgAt = Date.now();
+        if (this.pingTimer) clearInterval(this.pingTimer);
+        if (this.watchdog) clearInterval(this.watchdog);
+        this.pingTimer = setInterval(() => this.send({ ping: 1 }).catch(() => {}), 20000);
+        // silent/dead socket detection: no message for 60s -> force close so we reconnect
+        this.watchdog = setInterval(() => {
+          if (this.ws === ws && Date.now() - this.lastMsgAt > 60000) ws.close();
+        }, 10000);
         resolve();
       };
       ws.onerror = () => reject(new Error("Connection to Deriv failed"));
       ws.onclose = () => {
+        if (this.ws !== ws) return;
         if (this.pingTimer) clearInterval(this.pingTimer);
+        if (this.watchdog) clearInterval(this.watchdog);
+        this.pingTimer = this.watchdog = null;
+        this.ws = null;
+        this.pending.forEach((p) => p.rej(new Error("Connection closed")));
+        this.pending.clear();
         this.listeners.forEach((l) => l({ msg_type: "__closed" }));
       };
       ws.onmessage = (ev) => {
+        this.lastMsgAt = Date.now();
         const m: Msg = JSON.parse(ev.data);
         const p = m.req_id ? this.pending.get(m.req_id) : undefined;
         if (p) {
@@ -100,7 +116,8 @@ export class DerivClient {
   }
 
   async send(req: Msg): Promise<Msg> {
-    await this.ensureSocket();
+    // Never silently open an unauthenticated socket; the account must reconnect first.
+    if (!this.open) throw new Error("Not connected");
     const req_id = this.reqId++;
     return new Promise((res, rej) => {
       this.pending.set(req_id, { res, rej });
@@ -182,8 +199,17 @@ export class DerivClient {
   }
 
   disconnect() {
-    this.ws?.close();
+    const ws = this.ws;
     this.ws = null;
+    if (this.pingTimer) clearInterval(this.pingTimer);
+    if (this.watchdog) clearInterval(this.watchdog);
+    this.pingTimer = this.watchdog = null;
+    this.pending.forEach((p) => p.rej(new Error("Disconnected")));
+    this.pending.clear();
+    if (ws) {
+      ws.onclose = null;
+      ws.close();
+    }
   }
 }
 
