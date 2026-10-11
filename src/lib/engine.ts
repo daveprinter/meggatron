@@ -1,5 +1,6 @@
 import { deriv } from "./deriv";
 import { feed } from "./feed";
+import { startKeepAlive, stopKeepAlive } from "./keepalive";
 import { coverage, estProfitRatio, martingaleStake, MIN_STAKE, round2 } from "./martingale";
 import { analyse, type Signal } from "./signals";
 import {
@@ -184,11 +185,17 @@ export function launchEngine() {
   curHour = -1;
   if (loop) clearInterval(loop);
   loop = setInterval(tickLoop, 1000);
+  // stay awake on screen + keep running when minimised; on return, resync feed
+  startKeepAlive(() => {
+    syncFeed();
+    if (getState().conn.status !== "connected" && getState().settings.token) void connectAccount();
+  });
 }
 
 export function stopEngine() {
   if (loop) clearInterval(loop);
   loop = null;
+  stopKeepAlive();
   setState((st) => ({ session: { ...st.session, launched: false } }));
   eng({ status: "Stopped", nextAt: null, cooldownUntil: null, signal: "" });
 }
