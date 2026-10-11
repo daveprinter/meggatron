@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 export function Panel({ title, children, className }: { title?: string; children: ReactNode; className?: string }) {
@@ -23,16 +23,33 @@ export function NumField({
   step?: number;
   min?: number;
 }) {
+  const [draft, setDraft] = useState<string>(String(value));
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setDraft(String(value));
+  }, [value, focused]);
   return (
     <label className="block">
       <span className="field-label">{label}</span>
       <input
-        type="number"
+        type="text"
+        inputMode="decimal"
         className="input"
-        value={value}
-        step={step}
-        min={min}
-        onChange={(e) => onChange(Number(e.target.value))}
+        value={draft}
+        data-step={step}
+        data-min={min}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          setDraft(String(value));
+        }}
+        onChange={(e) => {
+          const t = e.target.value.replace(",", ".");
+          if (t !== "" && !/^-?\d*\.?\d*$/.test(t)) return;
+          setDraft(t);
+          const n = Number(t);
+          if (t !== "" && t !== "." && t !== "-" && Number.isFinite(n)) onChange(n);
+        }}
       />
     </label>
   );
