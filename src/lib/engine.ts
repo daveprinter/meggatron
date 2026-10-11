@@ -147,6 +147,7 @@ export function disconnectAccount() {
 let loop: ReturnType<typeof setInterval> | null = null;
 let busy = false;
 let curHour = -1;
+let hourStart = 0;
 let nextAllowed = 0;
 let hourProfit = 0;
 let targetLogged = false;
@@ -169,7 +170,6 @@ const eng = (patch: Partial<ReturnType<typeof getState>["engine"]>) =>
 
 export function launchEngine() {
   const s = getState();
-  if (!s.session.startedAt) return addLog("Start a session in Settings first", "warn");
   if (s.conn.status !== "connected") return addLog("Connect your Deriv account first", "warn");
   if (!CONTRACTS.some((k) => s.settings.contracts[k].enabled))
     return addLog("Select at least one contract type", "warn");
@@ -180,7 +180,9 @@ export function launchEngine() {
   cooldownUntil = 0;
   nextAllowed = 0;
   eng({ market: markets[0]!, status: "Scanning markets", cooldownUntil: null });
-  setState((st) => ({ session: { ...st.session, launched: true } }));
+  const launchedAt = Date.now();
+  setState((st) => ({ session: { startedAt: st.session.startedAt ?? launchedAt, launched: true } }));
+  hourStart = launchedAt;
   syncFeed();
   addLog(
     s.settings.analysis
@@ -235,7 +237,8 @@ async function tickLoop() {
     return stopEngine();
   }
 
-  const hk = Math.floor(now / HOUR);
+  if (!hourStart) hourStart = now;
+  const hk = Math.floor((now - hourStart) / HOUR);
   if (hk !== curHour) {
     if (curHour !== -1) addLog("New hour — hourly target reset");
     curHour = hk;
@@ -258,7 +261,7 @@ async function tickLoop() {
       targetLogged = true;
       addLog(`Hourly target $${st.hourlyTarget} reached — resting until next hour`, "win");
     }
-    return eng({ status: "Target reached · resting", nextAt: (hk + 1) * HOUR });
+    return eng({ status: "Target reached · resting", nextAt: hourStart + (hk + 1) * HOUR });
   }
   if (now < cooldownUntil) return;
   if (cooldownUntil) {
