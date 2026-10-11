@@ -215,6 +215,23 @@ function Home() {
       </Panel>
 
       <Panel title="Session">
+        <div className="mb-4">
+          <span className="field-label">Entry mode</span>
+          <Segmented
+            value={s.analysis ? "on" : "off"}
+            options={[
+              { value: "on", label: "Analysis" },
+              { value: "off", label: "No Analysis" },
+            ]}
+            onChange={(v) => updateSettings({ analysis: v === "on" })}
+          />
+          <p className="mt-2 text-xs text-muted-foreground">
+            {s.analysis
+              ? "Trades only when the AI's analysis gives an entry signal."
+              : "Starts trading the selected contracts immediately on launch, no analysis."}{" "}
+            Stops for the rest of the hour once the hourly target is hit.
+          </p>
+        </div>
         {!session.startedAt ? (
           <p className="text-sm text-muted-foreground">
             No live session. <Link to="/settings" className="text-primary underline">Start one in Settings</Link>.
@@ -233,6 +250,18 @@ function Home() {
         )}
       </Panel>
     </>
+  );
+}
+
+function MarketPrice({ symbol }: { symbol: string }) {
+  const t = useApp((x) => x.ticks[symbol]);
+  if (!t) return <div className="num mt-1 text-muted-foreground">loading…</div>;
+  const dir = t.prev === undefined ? "" : t.price > t.prev ? "text-success" : t.price < t.prev ? "text-destructive" : "";
+  return (
+    <div className="num mt-1 flex items-center justify-between">
+      <span className={cn("text-sm font-bold", dir)}>{t.price.toFixed(t.pip)}</span>
+      <span className="text-muted-foreground">digit {t.digit}</span>
+    </div>
   );
 }
 

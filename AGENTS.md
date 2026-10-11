@@ -12,4 +12,3 @@
 ## Architecture
 - Trading engine and Deriv socket live as browser singletons in src/lib (engine.ts, deriv.ts) with a tiny external store (store.ts) so trading keeps running across tab navigation.
 - Stake math lives in src/lib/martingale.ts as pure functions so it stays unit-tested.
-- Per-user settings and trades sync to Lovable Cloud via src/lib/cloud.ts subscribing to the store; localStorage stays as offline cache.
