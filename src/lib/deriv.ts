@@ -4,11 +4,9 @@
 type Msg = any;
 type Listener = (m: Msg) => void;
 
-export const DERIV_LEGACY_APP_ID = "1089";
 // PAT tokens use Deriv's new PAT-format App ID.
 export const DERIV_NEW_APP_ID = "34DWL0183Hjp3s2BF8ROk";
 
-const DERIV_LEGACY_WS = `wss://ws.derivws.com/websockets/v3?app_id=${DERIV_LEGACY_APP_ID}`;
 const DERIV_REST_BASE = "https://api.derivws.com/trading/v1/options";
 
 export type TokenMode = "legacy" | "pat";
@@ -75,7 +73,7 @@ export class DerivClient {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 
-  private ensureSocket(url: string = DERIV_LEGACY_WS): Promise<void> {
+  private ensureSocket(url: string): Promise<void> {
     if (this.open) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(url);
@@ -146,21 +144,6 @@ export class DerivClient {
       });
       this.ws!.send(JSON.stringify({ ...req, req_id }));
     });
-  }
-
-  // Legacy: authorize over the public websocket.
-  private async connectLegacy(token: string): Promise<DerivAuthResult> {
-    this.mode = "legacy";
-    await this.ensureSocket(DERIV_LEGACY_WS);
-    const auth = await this.send({ authorize: token });
-    if (!auth?.authorize) throw new Error("Invalid token (legacy)");
-    await this.send({ balance: 1, subscribe: 1 }).catch(() => {});
-    return {
-      balance: Number(auth.authorize.balance ?? 0),
-      currency: auth.authorize.currency || "USD",
-      loginid: auth.authorize.loginid,
-      mode: "legacy",
-    };
   }
 
   // PAT: REST accounts -> OTP websocket URL -> connect directly.
