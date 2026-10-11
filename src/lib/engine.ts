@@ -106,26 +106,62 @@ function wireAccount() {
       setState(() => ({ balance: m.balance.balance, currency: m.balance.currency }));
     }
     if (m.msg_type === "__closed") {
-      setState(() => ({ conn: { status: "idle", error: "Disconnected" } }));
-      addError("Deriv account connection closed");
-      // auto-reconnect while a session is running (e.g. after the phone was minimised)
-      if (getState().session.launched && getState().settings.token)
-        setTimeout(() => {
-          if (getState().session.launched && getState().conn.status !== "connected") void connectAccount();
-        }, 3000);
+      setState(() => ({ conn: { status: "connecting", loginid: getState().conn.loginid } }));
+      addLog("Deriv connection dropped — reconnecting…");
+      scheduleReconnect();
     }
     if (m.error && m.msg_type !== "ping") addError(`Deriv API: ${m.error.message}`);
   });
 }
 
+let manualDisconnect = false;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempt = 0;
+let connecting = false;
+let watchersWired = false;
+
+function scheduleReconnect() {
+  if (manualDisconnect || !getState().settings.token || reconnectTimer) return;
+  const delay = Math.min(30000, 1000 * 2 ** reconnectAttempt);
+  reconnectAttempt++;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (!deriv.open) void connectAccount();
+  }, delay);
+}
+
+function wireConnectionWatchers() {
+  if (watchersWired || typeof window === "undefined") return;
+  watchersWired = true;
+  const kick = () => {
+    if (manualDisconnect || !getState().settings.token || deriv.open || connecting) return;
+    reconnectAttempt = 0;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    void connectAccount();
+  };
+  window.addEventListener("online", kick);
+  window.addEventListener("focus", kick);
+  document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && kick());
+  // periodic health check (also runs while minimised, throttled by the browser)
+  setInterval(kick, 15000);
+}
+
 export async function connectAccount() {
+  manualDisconnect = false;
   wireAccount();
+  wireConnectionWatchers();
+  if (connecting) return;
+  if (deriv.open && getState().conn.status === "connected") return;
   syncFeed();
   const token = getState().settings.token;
   if (!token) return;
   setState(() => ({ conn: { status: "connecting" } }));
+  connecting = true;
   try {
+    deriv.disconnect();
     const a = await deriv.connect(token);
+    reconnectAttempt = 0;
     setState(() => ({
       conn: { status: "connected", loginid: a.loginid },
       balance: a.balance,
@@ -133,12 +169,18 @@ export async function connectAccount() {
     }));
     addLog(`Connected to ${a.loginid} (${a.mode.toUpperCase()})`);
   } catch (e: any) {
-    setState(() => ({ conn: { status: "error", error: e.message } }));
+    setState(() => ({ conn: { status: "error", error: `${e.message} — retrying…` } }));
     addError(`Connect failed: ${e.message}`);
+    scheduleReconnect();
+  } finally {
+    connecting = false;
   }
 }
 
 export function disconnectAccount() {
+  manualDisconnect = true;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = null;
   stopEngine();
   deriv.disconnect();
   setState(() => ({ conn: { status: "idle" }, balance: null }));
