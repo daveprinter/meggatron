@@ -76,7 +76,8 @@ export interface Trade {
 
 export interface AppState {
   settings: Settings;
-  session: { startedAt: number | null; launched: boolean };
+  session: { startedAt: number | null; launched: boolean; hourStart?: number | null };
+  payouts: Record<string, { ratio: number; payout: number; stake: number; t: number; src: "deriv" | "trade" }>;
   conn: { status: "idle" | "connecting" | "connected" | "error"; error?: string | undefined; loginid?: string | undefined };
   balance: number | null;
   currency: string;
@@ -134,6 +135,7 @@ let state: AppState = {
   settings: defaultSettings,
   session: { startedAt: null, launched: false },
   conn: { status: "idle" },
+  payouts: {},
   balance: null,
   currency: "USD",
   ticks: {},
@@ -181,9 +183,9 @@ export function clearErrors() {
 let hydrated = false;
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 function writeNow() {
-  const { settings, session, trades, log, errors } = state;
+  const { settings, session, trades, log, errors, payouts } = state;
   try {
-    localStorage.setItem(KEY, JSON.stringify({ settings, session, trades, log, errors }));
+    localStorage.setItem(KEY, JSON.stringify({ settings, session, trades, log, errors, payouts }));
   } catch {
     /* quota */
   }
@@ -216,6 +218,7 @@ export function hydrate() {
         trades: p.trades ?? [],
         log: p.log ?? [],
         errors: p.errors ?? [],
+        payouts: p.payouts ?? {},
       };
     }
   } catch {

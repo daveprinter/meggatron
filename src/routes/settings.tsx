@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { NumField, Panel, Segmented, Toggle } from "@/components/kit";
+import { NumField, Panel, Segmented, Stat, Toggle } from "@/components/kit";
 import { stopEngine } from "@/lib/engine";
+import { cn } from "@/lib/utils";
 import { addLog, nairobiTime, setState, updateSettings, useApp } from "@/lib/store";
 
 export const Route = createFileRoute("/settings")({
@@ -50,6 +51,7 @@ function SettingsPage() {
                 <span className="num text-foreground">{fmtDur(Math.max(0, now - session.startedAt))}</span>
               </div>
             </div>
+            <HourStats now={now} />
             <div className="grid grid-cols-2 gap-2">
               <button
                 className="btn-danger"
@@ -138,5 +140,48 @@ function SettingsPage() {
         </div>
       </Panel>
     </>
+  );
+}
+
+function HourStats({ now }: { now: number }) {
+  const session = useApp((x) => x.session);
+  const trades = useApp((x) => x.trades);
+  const start = session.hourStart ?? session.startedAt ?? 0;
+  const inSession = trades.filter((t) => session.startedAt && t.time >= session.startedAt);
+  const wins = inSession.filter((t) => t.profit >= 0).length;
+  const losses = inSession.length - wins;
+  const net = inSession.reduce((a, t) => a + t.profit, 0);
+  const cur = start && now >= start ? Math.floor((now - start) / 3600000) : 0;
+  const hours = Array.from({ length: cur + 1 }, (_, i) => {
+    const from = start + i * 3600000;
+    const ts = inSession.filter((t) => t.time >= from && t.time < from + 3600000);
+    const w = ts.filter((t) => t.profit >= 0).length;
+    return { i, from, n: ts.length, w, l: ts.length - w, pnl: ts.reduce((a, t) => a + t.profit, 0) };
+  }).reverse();
+  return (
+    <div className="mb-3 space-y-3">
+      <div className="grid grid-cols-3 gap-2">
+        <Stat label="Wins" value={wins} tone="up" />
+        <Stat label="Losses" value={losses} tone="down" />
+        <Stat label="Net P/L" value={`${net >= 0 ? "+" : ""}${net.toFixed(2)}`} tone={net >= 0 ? "up" : "down"} />
+      </div>
+      {start > 0 && (
+        <div className="space-y-2">
+          {hours.map((h) => (
+            <div key={h.i} className={cn("rounded-lg border p-3 text-sm", h.i === cur ? "border-primary bg-primary/10" : "bg-secondary/50")}>
+              <div className="flex justify-between font-semibold">
+                <span>Hour {h.i + 1} {h.i === cur ? "· running" : "· done"}</span>
+                <span className={cn("num", h.pnl >= 0 ? "text-success" : "text-destructive")}>
+                  {h.pnl >= 0 ? "+" : ""}{h.pnl.toFixed(2)}
+                </span>
+              </div>
+              <div className="num text-xs text-muted-foreground">
+                Started {nairobiTime(new Date(h.from))} · {h.n} trades · {h.w} wins · {h.l} losses
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

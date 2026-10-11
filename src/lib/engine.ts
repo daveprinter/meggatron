@@ -2,6 +2,7 @@ import { deriv } from "./deriv";
 import { feed } from "./feed";
 import { startKeepAlive, stopKeepAlive } from "./keepalive";
 import { coverage, estProfitRatio, martingaleStake, MIN_STAKE, round2 } from "./martingale";
+import { learnFromTrade, payoutRatio } from "./payouts";
 import { analyse, type Signal } from "./signals";
 import {
   addError,
@@ -181,7 +182,7 @@ export function launchEngine() {
   nextAllowed = 0;
   eng({ market: markets[0]!, status: "Scanning markets", cooldownUntil: null });
   const launchedAt = Date.now();
-  setState((st) => ({ session: { startedAt: st.session.startedAt ?? launchedAt, launched: true } }));
+  setState((st) => ({ session: { startedAt: st.session.startedAt ?? launchedAt, launched: true, hourStart: launchedAt } }));
   hourStart = launchedAt;
   syncFeed();
   addLog(
@@ -419,17 +420,32 @@ async function runTrade(symbol: string, candsIn: Signal[]) {
     if (st.recoveryMode === "different" && lastType && cands.some((c) => c.type !== lastType)) cands = cands.filter((c) => c.type !== lastType);
     const need = st.recoveryCoverage / 100;
     const scored = cands
-      .map((c) => ({ c, cov: coverage(stake, estProfitRatio(c.prob), lossAccum) }))
-      .sort((a, b) => b.c.prob - a.c.prob);
+      .map((c) => {
+        const ratio = payoutRatio(symbol, c.type, c.pred, tickMode ? 1 : st.contracts[c.type].ticks) ?? estProfitRatio(c.prob);
+        // expected value per $ staked using the real Deriv payout
+        return { c, ratio, cov: coverage(stake, ratio, lossAccum), ev: c.prob * ratio - (1 - c.prob) };
+      })
+      .sort((a, b) => b.c.prob - a.c.prob || b.ev - a.ev);
     const ok = scored.filter((x) => x.cov >= need);
     const best = ok[0] ?? scored.sort((a, b) => b.cov - a.cov)[0]!;
     chosen = best.c;
+    // if even the best pick can't cover the target, raise stake (within max stake) so it does
+    if (!ok.length && best.ratio > 0) {
+      const needed = round2((lossAccum * need) / best.ratio);
+      const cap = st.contracts[chosen.type].maxStake * Math.pow(Math.min(st.mgMultiplier, st.mgMaxMultiplier), st.mgMaxSteps);
+      if (needed > stake) stake = Math.min(needed, cap);
+      best.cov = coverage(stake, best.ratio, lossAccum);
+    }
     addLog(
-      `Recovery step ${mgStep}: ${label(chosen)} stake ${stake.toFixed(2)} covers ${(best.cov * 100).toFixed(0)}% of loss ${lossAccum.toFixed(2)}${ok.length ? "" : " (below target — best available)"}`,
+      `Recovery step ${mgStep}: ${label(chosen)} payout ${(best.ratio * 100).toFixed(1)}% · stake ${stake.toFixed(2)} covers ${(best.cov * 100).toFixed(0)}% of loss ${lossAccum.toFixed(2)}${ok.length ? "" : " (below target — best available)"}`,
       ok.length ? "info" : "warn",
     );
   } else {
-    chosen = pick(cands);
+    chosen = pick(cands.map((c) => {
+      // weight edge by real payout: same win chance with a higher payout is better
+      const r = payoutRatio(symbol, c.type, c.pred, tickMode ? 1 : st.contracts[c.type].ticks);
+      return r ? { ...c, edge: c.edge * (1 + (c.prob * r - (1 - c.prob))) } : c;
+    }));
     stake = baseStake(chosen);
   }
   stake = Math.max(MIN_STAKE, round2(stake));
@@ -455,6 +471,10 @@ async function runTrade(symbol: string, candsIn: Signal[]) {
     const proposalId = prop?.proposal?.id;
     if (!proposalId) throw new Error("Deriv did not return a proposal ID");
     payout = prop.proposal.payout as number;
+    if (recovering && lossAccum > 0) {
+      const cov = (payout - stake) / lossAccum;
+      addLog(`Pre-buy check: live payout ${payout.toFixed(2)} → covers ${(cov * 100).toFixed(0)}% of loss`, cov >= st.recoveryCoverage / 100 ? "info" : "warn");
+    }
     const buy = await deriv.send({ buy: proposalId, price: stake });
     cid = buy.buy.contract_id;
   } else {
@@ -462,6 +482,7 @@ async function runTrade(symbol: string, candsIn: Signal[]) {
     cid = buy.buy.contract_id;
     payout = Number(buy.buy.payout ?? 0);
   }
+  learnFromTrade(symbol, chosen.type, chosen.pred, contractParams["duration"], stake, payout);
   const entryPrice = lastPrice[symbol] ?? 0;
   addLog(`Bought ${label(chosen)} · stake ${stake.toFixed(2)} · payout ${payout.toFixed(2)}`);
 
