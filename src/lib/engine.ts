@@ -168,6 +168,7 @@ export async function connectAccount() {
       currency: a.currency,
     }));
     addLog(`Connected to ${a.loginid} (${a.mode.toUpperCase()})`);
+    syncFeed();
   } catch (e: any) {
     setState(() => ({ conn: { status: "error", error: `${e.message} — retrying…` } }));
     addError(`Connect failed: ${e.message}`);
