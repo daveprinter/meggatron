@@ -87,8 +87,8 @@ export interface AppState {
   trades: Trade[];
   log: { t: number; msg: string; kind: "info" | "win" | "loss" | "warn" }[];
   floating: number;
-  learn?: LearnState;
-  runtime?: Record<string, any>; // engine progress, persisted so it resumes after drops/reloads
+  learn?: LearnState | undefined;
+  runtime?: Record<string, any> | undefined; // engine progress, persisted so it resumes after drops/reloads
   engine: { market: string; status: string; hourProfit: number; nextAt: number | null; cooldownUntil?: number | null; signal?: string };
 }
 

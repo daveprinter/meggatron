@@ -608,7 +608,7 @@ async function runTrade(symbol: string, candsIn: Signal[]) {
         off();
         reject(new Error("Contract result timed out"));
       }, 300_000);
-      let off = deriv.onMessage((m) => {
+      let off: () => unknown = deriv.onMessage((m) => {
         const poc = m.proposal_open_contract;
         if (m.msg_type !== "proposal_open_contract" || !poc || poc.contract_id !== cid) return;
         setState(() => ({ floating: poc.profit ?? 0 }));
