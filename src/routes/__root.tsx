@@ -143,6 +143,7 @@ function RootComponent() {
               ["/settings", "Settings"],
               ["/payouts", "Payouts"],
               ["/history", "History"],
+              ["/learning", "AI Learn"],
             ] as const
           ).map(([to, label]) => (
             <Link key={to} to={to} className={tab} activeProps={{ className: "text-primary" }} activeOptions={{ exact: true }}>
