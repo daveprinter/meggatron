@@ -4,6 +4,7 @@ import { startKeepAlive, stopKeepAlive } from "./keepalive";
 import { coverage, estProfitRatio, martingaleStake, MIN_STAKE, round2 } from "./martingale";
 import { learnFromTrade, payoutRatio } from "./payouts";
 import { analyse, type Signal } from "./signals";
+import { learn, learnedAvoid, learnedScore, note } from "./learning";
 import {
   addError,
   addLog,
@@ -33,7 +34,14 @@ let feedWired = false;
 let accountWired = false;
 
 function waitNextTick(symbol: string) {
-  return new Promise<TickInfo>((resolve) => tickWaiters.push({ symbol, resolve }));
+  return new Promise<TickInfo>((resolve, reject) => {
+    const w = { symbol, resolve: (t: TickInfo) => { clearTimeout(to); resolve(t); } };
+    const to = setTimeout(() => {
+      tickWaiters = tickWaiters.filter((x) => x !== w);
+      reject(new Error("No tick received (connection interrupted)"));
+    }, 30_000);
+    tickWaiters.push(w);
+  });
 }
 
 function wireFeed() {
@@ -169,6 +177,8 @@ export async function connectAccount() {
     }));
     addLog(`Connected to ${a.loginid} (${a.mode.toUpperCase()})`);
     syncFeed();
+    // internet/account back: continue the previous session automatically
+    resumeIfLaunched();
   } catch (e: any) {
     setState(() => ({ conn: { status: "error", error: `${e.message} — retrying…` } }));
     addError(`Connect failed: ${e.message}`);
@@ -212,8 +222,44 @@ let lastScanLog = 0;
 const eng = (patch: Partial<ReturnType<typeof getState>["engine"]>) =>
   setState((s) => ({ engine: { ...s.engine, ...patch } }));
 
-export function launchEngine() {
+function saveRuntime() {
+  setState(() => ({
+    runtime: {
+      hourStart, curHour, hourProfit, targetLogged, hourTypeTrades, hourTypeLosses,
+      bannedTypes: [...bannedTypes], mgStep, lossAccum, lastStake, lastType,
+      marketStartedAt, marketTrades, consecLosses, cooldownUntil, savedAt: Date.now(),
+    },
+  }));
+}
+
+function restoreRuntime() {
+  const r = getState().runtime;
+  if (!r || !r["hourStart"]) return false;
+  hourStart = r["hourStart"]; curHour = r["curHour"] ?? -1; hourProfit = r["hourProfit"] ?? 0;
+  targetLogged = !!r["targetLogged"]; hourTypeTrades = r["hourTypeTrades"] ?? {}; hourTypeLosses = r["hourTypeLosses"] ?? {};
+  bannedTypes = new Set(r["bannedTypes"] ?? []); mgStep = r["mgStep"] ?? 0; lossAccum = r["lossAccum"] ?? 0;
+  lastStake = r["lastStake"] ?? 0; lastType = r["lastType"] ?? null; marketStartedAt = r["marketStartedAt"] ?? Date.now();
+  marketTrades = r["marketTrades"] ?? 0; consecLosses = r["consecLosses"] ?? 0; cooldownUntil = r["cooldownUntil"] ?? 0;
+  eng({ hourProfit, cooldownUntil: cooldownUntil || null });
+  return true;
+}
+
+export function launchEngine(resume = false) {
   const s = getState();
+  if (resume && s.session.launched && restoreRuntime()) {
+    if (loop) clearInterval(loop);
+    loop = setInterval(tickLoop, 1000);
+    busy = false;
+    nextAllowed = 0;
+    consecErrors = 0;
+    syncFeed();
+    addLog(`Session resumed where it left off — hour P/L ${hourProfit.toFixed(2)}${mgStep ? `, recovery step ${mgStep} (loss ${lossAccum.toFixed(2)})` : ""}${cooldownUntil > Date.now() ? ", cooldown still running" : ""}`);
+    startKeepAlive(() => {
+      syncFeed();
+      if (getState().conn.status !== "connected" && getState().settings.token) void connectAccount();
+    });
+    return;
+  }
   if (s.conn.status !== "connected") return addLog("Connect your Deriv account first", "warn");
   if (!CONTRACTS.some((k) => s.settings.contracts[k].enabled))
     return addLog("Select at least one contract type", "warn");
@@ -234,6 +280,10 @@ export function launchEngine() {
       : `Megatron AI launched — No Analysis mode, trading ${markets.map(marketName).join(", ")} immediately`,
   );
   curHour = -1;
+  mgStep = 0; lossAccum = 0; consecLosses = 0; hourProfit = 0;
+  setState((st) => ({ learn: st.learn ? { ...st.learn, sessions: st.learn.sessions + 1 } : st.learn }));
+  note(`Session #${(getState().learn?.sessions ?? 0) || 1} started — using lessons from ${getState().trades.length} past trades.`);
+  saveRuntime();
   if (loop) clearInterval(loop);
   loop = setInterval(tickLoop, 1000);
   // stay awake on screen + keep running when minimised; on return, resync feed
@@ -253,7 +303,7 @@ export function stopEngine() {
 
 export function resumeIfLaunched() {
   const s = getState();
-  if (s.session.launched && s.conn.status === "connected" && !loop) launchEngine();
+  if (s.session.launched && s.conn.status === "connected" && !loop) launchEngine(true);
 }
 
 function activeMarkets() {
@@ -264,6 +314,7 @@ function activeMarkets() {
 function startCooldown(ms: number, why: string) {
   cooldownUntil = Date.now() + ms;
   eng({ cooldownUntil, status: `Cooldown (${why})` });
+  note(`Cooldown triggered: ${why} on ${marketName(getState().engine.market)}.`, "avoid");
   addLog(`Cooldown ${Math.round(ms / 60000)} min — ${why}. Recovery resumes after.`, "warn");
 }
 
@@ -272,6 +323,10 @@ async function tickLoop() {
   const s = getState();
   const st = s.settings;
   const now = Date.now();
+  if (s.conn.status !== "connected" || !deriv.open) {
+    if (s.engine.status !== "Waiting for connection…") eng({ status: "Waiting for connection…" });
+    return;
+  }
 
   const sessionPnl = s.trades
     .filter((t) => s.session.startedAt && t.time >= s.session.startedAt)
@@ -296,6 +351,7 @@ async function tickLoop() {
     hourTypeTrades = {};
     hourTypeLosses = {};
     eng({ hourProfit: 0, nextAt: null });
+    saveRuntime();
   }
 
   const elapsed = (now - (s.session.startedAt ?? now)) % (24 * HOUR);
@@ -313,7 +369,8 @@ async function tickLoop() {
     consecLosses = 0;
     consecErrors = 0;
     eng({ cooldownUntil: null });
-    addLog("Cooldown over — scanning for entries");
+    addLog("Cooldown over — trading continues");
+    saveRuntime();
   }
   if (now < nextAllowed) return;
 
@@ -348,6 +405,7 @@ async function tickLoop() {
   if (getState().settings.tradeSpeed !== "tick") nextAllowed = Math.max(nextAllowed, Date.now() + 1500);
   if (consecLosses >= LOSS_COOLDOWN_AFTER && !cooldownUntil)
     startCooldown(LOSS_COOLDOWN_MS, `${consecLosses} losses in a row`);
+  saveRuntime();
 }
 
 /** Scan active markets and return the best one with live entry signals. */
@@ -399,6 +457,7 @@ function noAnalysisSignals(): Signal[] {
 
 function eligible(c: Signal) {
   const st = getState().settings;
+  if (learnedAvoid(getState().engine.market, c.type, c.pred)) return false;
   if (st.tradeMode !== "manual") return true;
   if ((hourTypeTrades[c.type] ?? 0) >= st.typeMaxTrades) return false;
   if ((hourTypeLosses[c.type] ?? 0) >= st.typeMaxLosses) return false;
@@ -441,10 +500,9 @@ function baseStake(c: Signal) {
   return Math.min(max, Math.max(MIN_STAKE, round2(MIN_STAKE + (max - MIN_STAKE) * conf * typePerf(c.type))));
 }
 
-function pick(cands: Signal[]): Signal {
-  return [...cands].sort(
-    (a, b) => b.edge * typePerf(b.type) * (b.type === lastType ? 0.9 : 1) - a.edge * typePerf(a.type) * (a.type === lastType ? 0.9 : 1),
-  )[0]!;
+function pick(cands: Signal[], symbol: string): Signal {
+  const sc = (c: Signal) => c.edge * typePerf(c.type) * (c.type === lastType ? 0.9 : 1) * learnedScore(symbol, c.type, c.pred);
+  return [...cands].sort((a, b) => sc(b) - sc(a))[0]!;
 }
 
 async function runTrade(symbol: string, candsIn: Signal[]) {
@@ -466,9 +524,10 @@ async function runTrade(symbol: string, candsIn: Signal[]) {
       .map((c) => {
         const ratio = payoutRatio(symbol, c.type, c.pred, tickMode ? 1 : st.contracts[c.type].ticks) ?? estProfitRatio(c.prob);
         // expected value per $ staked using the real Deriv payout
-        return { c, ratio, cov: coverage(stake, ratio, lossAccum), ev: c.prob * ratio - (1 - c.prob) };
+        const ls = learnedScore(symbol, c.type, c.pred, true);
+        return { c, ratio, ls, cov: coverage(stake, ratio, lossAccum), ev: c.prob * ratio - (1 - c.prob) };
       })
-      .sort((a, b) => b.c.prob - a.c.prob || b.ev - a.ev);
+      .sort((a, b) => b.c.prob * b.ls - a.c.prob * a.ls || b.ev - a.ev);
     const ok = scored.filter((x) => x.cov >= need);
     const best = ok[0] ?? scored.sort((a, b) => b.cov - a.cov)[0]!;
     chosen = best.c;
@@ -488,7 +547,7 @@ async function runTrade(symbol: string, candsIn: Signal[]) {
       // weight edge by real payout: same win chance with a higher payout is better
       const r = payoutRatio(symbol, c.type, c.pred, tickMode ? 1 : st.contracts[c.type].ticks);
       return r ? { ...c, edge: c.edge * (1 + (c.prob * r - (1 - c.prob))) } : c;
-    }));
+    }), symbol);
     stake = baseStake(chosen);
   }
   stake = Math.max(MIN_STAKE, round2(stake));
@@ -548,8 +607,8 @@ async function runTrade(symbol: string, candsIn: Signal[]) {
       const timeout = setTimeout(() => {
         off();
         reject(new Error("Contract result timed out"));
-      }, 120_000);
-      const off = deriv.onMessage((m) => {
+      }, 300_000);
+      let off = deriv.onMessage((m) => {
         const poc = m.proposal_open_contract;
         if (m.msg_type !== "proposal_open_contract" || !poc || poc.contract_id !== cid) return;
         setState(() => ({ floating: poc.profit ?? 0 }));
@@ -559,7 +618,12 @@ async function runTrade(symbol: string, candsIn: Signal[]) {
           resolve(Number(poc.profit));
         }
       });
-      deriv.send({ proposal_open_contract: 1, contract_id: cid, subscribe: 1 }).catch(() => {});
+      const sub = () => deriv.send({ proposal_open_contract: 1, contract_id: cid, subscribe: 1 }).catch(() => {});
+      // after an internet drop, re-subscribe to the open contract when the socket is back
+      const offOpen = deriv.onMessage((m) => m.msg_type === "__open" && setTimeout(sub, 1500));
+      const off0 = off;
+      off = () => { off0(); offOpen(); };
+      sub();
     });
   }
   setState(() => ({ floating: 0 }));
@@ -575,6 +639,7 @@ async function runTrade(symbol: string, candsIn: Signal[]) {
     recovery: recovering,
   };
   setState((st2) => ({ trades: [trade, ...st2.trades].slice(0, 2000) }));
+  learn(trade);
   hourProfit = round2(hourProfit + profit);
   eng({ hourProfit });
   marketTrades++;
