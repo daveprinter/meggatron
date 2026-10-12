@@ -246,7 +246,7 @@ function Home() {
         {session.launched ? (
           <button className="btn-danger w-full" onClick={stopEngine}>Stop Session</button>
         ) : (
-          <button className="btn-primary w-full" onClick={launchEngine}>Launch Session</button>
+          <button className="btn-primary w-full" onClick={() => launchEngine()}>Launch Session</button>
         )}
       </Panel>
     </>
