@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import type { LearnState } from "./learning";
 
 export const MARKETS = [
   { symbol: "1HZ10V", name: "Volatility 10 (1s)" },
@@ -86,6 +87,8 @@ export interface AppState {
   trades: Trade[];
   log: { t: number; msg: string; kind: "info" | "win" | "loss" | "warn" }[];
   floating: number;
+  learn?: LearnState;
+  runtime?: Record<string, any>; // engine progress, persisted so it resumes after drops/reloads
   engine: { market: string; status: string; hourProfit: number; nextAt: number | null; cooldownUntil?: number | null; signal?: string };
 }
 
@@ -183,9 +186,9 @@ export function clearErrors() {
 let hydrated = false;
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 function writeNow() {
-  const { settings, session, trades, log, errors, payouts } = state;
+  const { settings, session, trades, log, errors, payouts, learn, runtime } = state;
   try {
-    localStorage.setItem(KEY, JSON.stringify({ settings, session, trades, log, errors, payouts }));
+    localStorage.setItem(KEY, JSON.stringify({ settings, session, trades, log, errors, payouts, learn, runtime }));
   } catch {
     /* quota */
   }
@@ -219,6 +222,8 @@ export function hydrate() {
         log: p.log ?? [],
         errors: p.errors ?? [],
         payouts: p.payouts ?? {},
+        learn: p.learn,
+        runtime: p.runtime,
       };
     }
   } catch {
