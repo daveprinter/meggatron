@@ -12,3 +12,4 @@
 ## Architecture
 - Trading engine and Deriv socket live as browser singletons in src/lib (engine.ts, deriv.ts) with a tiny external store (store.ts) so trading keeps running across tab navigation.
 - Stake math lives in src/lib/martingale.ts as pure functions so it stays unit-tested.
+- Cross-session trade learning lives in src/lib/learning.ts (persisted in the store) and engine runtime progress is persisted as state.runtime so sessions resume after drops/reloads.
