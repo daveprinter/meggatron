@@ -20,6 +20,8 @@ import {
 } from "./store";
 
 const HOUR = 3600_000;
+const periodMs = (st: { periodMinutes?: number }) => Math.max(1, st.periodMinutes || 60) * 60_000;
+const st0 = () => getState().settings;
 const LOSS_COOLDOWN_AFTER = 3; // consecutive losses
 const LOSS_COOLDOWN_MS = 3 * 60_000;
 const ERROR_COOLDOWN_AFTER = 3; // consecutive errors
@@ -337,7 +339,7 @@ async function tickLoop() {
   }
 
   if (!hourStart) hourStart = now;
-  const hk = Math.floor((now - hourStart) / HOUR);
+  const hk = Math.floor((now - hourStart) / periodMs(st0()));
   if (hk !== curHour) {
     if (curHour !== -1) addLog("New hour — hourly target reset");
     curHour = hk;
@@ -361,7 +363,7 @@ async function tickLoop() {
       targetLogged = true;
       addLog(`Hourly target $${st.hourlyTarget} reached — resting until next hour`, "win");
     }
-    return eng({ status: "Target reached · resting", nextAt: hourStart + (hk + 1) * HOUR });
+    return eng({ status: "Target reached · resting", nextAt: hourStart + (hk + 1) * periodMs(st0()) });
   }
   if (now < cooldownUntil) return;
   if (cooldownUntil) {
