@@ -341,7 +341,7 @@ async function tickLoop() {
   if (!hourStart) hourStart = now;
   const hk = Math.floor((now - hourStart) / periodMs(st0()));
   if (hk !== curHour) {
-    if (curHour !== -1) addLog("New hour — hourly target reset");
+    if (curHour !== -1) addLog("New period — target reset");
     curHour = hk;
     hourProfit = 0;
     targetLogged = false;
@@ -361,7 +361,7 @@ async function tickLoop() {
   if (hourProfit >= st.hourlyTarget) {
     if (!targetLogged) {
       targetLogged = true;
-      addLog(`Hourly target $${st.hourlyTarget} reached — resting until next hour`, "win");
+      addLog(`Hourly target $${st.hourlyTarget} reached — resting until next period`, "win");
     }
     return eng({ status: "Target reached · resting", nextAt: hourStart + (hk + 1) * periodMs(st0()) });
   }

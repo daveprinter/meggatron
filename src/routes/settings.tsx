@@ -97,7 +97,8 @@ function SettingsPage() {
 
       <Panel title="Targets">
         <div className="grid grid-cols-2 gap-3">
-          <NumField label="Profit per hour ($)" value={s.hourlyTarget} step={0.1} onChange={(n) => updateSettings({ hourlyTarget: n })} />
+          <NumField label="Profit per period ($)" value={s.hourlyTarget} step={0.1} onChange={(n) => updateSettings({ hourlyTarget: n })} />
+          <NumField label="Trading period (minutes)" value={s.periodMinutes} min={1} onChange={(n) => updateSettings({ periodMinutes: Math.max(1, Math.min(1440, Math.round(n))) })} />
           <NumField label="Hours per 24h day" value={s.hoursPerDay} min={1} onChange={(n) => updateSettings({ hoursPerDay: Math.max(1, Math.min(24, n)) })} />
           <NumField label="Session stop loss ($)" value={s.stopLoss} step={0.5} onChange={(n) => updateSettings({ stopLoss: n })} />
         </div>
@@ -146,15 +147,16 @@ function SettingsPage() {
 function HourStats({ now }: { now: number }) {
   const session = useApp((x) => x.session);
   const trades = useApp((x) => x.trades);
+  const P = Math.max(1, useApp((x) => x.settings.periodMinutes) || 60) * 60000;
   const start = session.hourStart ?? session.startedAt ?? 0;
   const inSession = trades.filter((t) => session.startedAt && t.time >= session.startedAt);
   const wins = inSession.filter((t) => t.profit >= 0).length;
   const losses = inSession.length - wins;
   const net = inSession.reduce((a, t) => a + t.profit, 0);
-  const cur = start && now >= start ? Math.floor((now - start) / 3600000) : 0;
+  const cur = start && now >= start ? Math.floor((now - start) / P) : 0;
   const hours = Array.from({ length: cur + 1 }, (_, i) => {
-    const from = start + i * 3600000;
-    const ts = inSession.filter((t) => t.time >= from && t.time < from + 3600000);
+    const from = start + i * P;
+    const ts = inSession.filter((t) => t.time >= from && t.time < from + P);
     const w = ts.filter((t) => t.profit >= 0).length;
     return { i, from, n: ts.length, w, l: ts.length - w, pnl: ts.reduce((a, t) => a + t.profit, 0) };
   }).reverse();
@@ -170,7 +172,7 @@ function HourStats({ now }: { now: number }) {
           {hours.map((h) => (
             <div key={h.i} className={cn("rounded-lg border p-3 text-sm", h.i === cur ? "border-primary bg-primary/10" : "bg-secondary/50")}>
               <div className="flex justify-between font-semibold">
-                <span>Hour {h.i + 1} {h.i === cur ? "· running" : "· done"}</span>
+                <span>Period {h.i + 1} {h.i === cur ? "· running" : "· done"}</span>
                 <span className={cn("num", h.pnl >= 0 ? "text-success" : "text-destructive")}>
                   {h.pnl >= 0 ? "+" : ""}{h.pnl.toFixed(2)}
                 </span>
