@@ -52,6 +52,7 @@ export interface Settings {
   typeMaxTrades: number;
   typeMaxLosses: number;
   hourlyTarget: number;
+  periodMinutes: number; // length of each trading period (default 60)
   hoursPerDay: number;
   stopLoss: number;
   mgEnabled: boolean;
@@ -122,6 +123,7 @@ export const defaultSettings: Settings = {
   typeMaxTrades: 5,
   typeMaxLosses: 2,
   hourlyTarget: 1,
+  periodMinutes: 60,
   hoursPerDay: 24,
   stopLoss: 10,
   mgEnabled: true,
