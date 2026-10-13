@@ -566,24 +566,54 @@ async function runTrade(symbol: string, candsIn: Signal[]) {
   if (chosen.pred !== undefined) contractParams["barrier"] = String(chosen.pred);
   eng({ status: `Buying ${label(chosen)}` });
 
-  let payout: number;
-  let cid: number;
-  if (deriv.mode === "pat") {
-    const prop = await deriv.send({ proposal: 1, ...contractParams, underlying_symbol: symbol });
-    const proposalId = prop?.proposal?.id;
-    if (!proposalId) throw new Error("Deriv did not return a proposal ID");
-    payout = prop.proposal.payout as number;
+  const symField = deriv.mode === "pat" ? "underlying_symbol" : "symbol";
+  const fullParams = { ...contractParams, [symField]: symbol };
+  const isUnknown = (e: any) => /unknown contract proposal|proposal.*(expired|not found)|invalid.*proposal/i.test(String(e?.message ?? e));
+  const checkCov = (p: number) => {
     if (recovering && lossAccum > 0) {
-      const cov = (payout - stake) / lossAccum;
-      addLog(`Pre-buy check: live payout ${payout.toFixed(2)} → covers ${(cov * 100).toFixed(0)}% of loss`, cov >= st.recoveryCoverage / 100 ? "info" : "warn");
+      const cov = (p - stake) / lossAccum;
+      addLog(`Pre-buy check: live payout ${p.toFixed(2)} → covers ${(cov * 100).toFixed(0)}% of loss`, cov >= st.recoveryCoverage / 100 ? "info" : "warn");
     }
-    const buy = await deriv.send({ buy: proposalId, price: stake });
-    cid = buy.buy.contract_id;
-  } else {
-    const buy = await deriv.send({ buy: 1, price: stake, parameters: { ...contractParams, symbol } });
-    cid = buy.buy.contract_id;
-    payout = Number(buy.buy.payout ?? 0);
+  };
+  // 1) Fresh proposal -> immediate buy at its ask_price (never cached).
+  const freshBuy = async () => {
+    const prop = await deriv.send({ proposal: 1, ...fullParams });
+    const pr = prop?.proposal;
+    if (!pr?.id) throw new Error("Deriv did not return a proposal ID");
+    checkCov(Number(pr.payout));
+    const b = await deriv.send({ buy: pr.id, price: Number(pr.ask_price ?? stake) });
+    return { cid: b.buy.contract_id as number, payout: Number(b.buy.payout ?? pr.payout) };
+  };
+  // 2) Subscribed proposal -> buy -> forget subscription.
+  const subBuy = async () => {
+    const prop = await deriv.send({ proposal: 1, subscribe: 1, ...fullParams });
+    const pr = prop?.proposal;
+    const subId = prop?.subscription?.id;
+    try {
+      if (!pr?.id) throw new Error("Deriv did not return a proposal ID");
+      const b = await deriv.send({ buy: pr.id, price: Number(pr.ask_price ?? stake) });
+      return { cid: b.buy.contract_id as number, payout: Number(b.buy.payout ?? pr.payout) };
+    } finally {
+      if (subId) deriv.send({ forget: subId }).catch(() => {});
+    }
+  };
+  // 3) Last resort: one-step buy with full parameters.
+  const oneStep = async () => {
+    const b = await deriv.send({ buy: 1, price: stake, parameters: fullParams });
+    return { cid: b.buy.contract_id as number, payout: Number(b.buy.payout ?? 0) };
+  };
+  let res: { cid: number; payout: number } | null = null;
+  let lastErr: any;
+  for (const [name, fn] of [["fresh", freshBuy], ["fresh", freshBuy], ["subscribed", subBuy], ["one-step", oneStep]] as const) {
+    try { res = await fn(); break; } catch (e) {
+      lastErr = e;
+      if (!isUnknown(e)) throw e;
+      addLog(`Proposal expired — retrying with ${name} proposal`, "warn");
+    }
   }
+  if (!res) throw lastErr;
+  const cid = res.cid;
+  const payout = res.payout;
   learnFromTrade(symbol, chosen.type, chosen.pred, contractParams["duration"], stake, payout);
   const entryPrice = lastPrice[symbol] ?? 0;
   addLog(`Bought ${label(chosen)} · stake ${stake.toFixed(2)} · payout ${payout.toFixed(2)}`);
