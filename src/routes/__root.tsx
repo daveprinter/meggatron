@@ -15,6 +15,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { getState, hydrate, nairobiTime, useApp } from "../lib/store";
 import { connectAccount, resumeIfLaunched, startFeed } from "../lib/engine";
 import { startPayoutScanner } from "../lib/payouts";
+import { LicenseGate } from "../components/LicenseGate";
 
 function NotFoundComponent() {
   return (
@@ -115,7 +116,7 @@ function RootComponent() {
       <LicenseGate>
         <AppShell />
       </LicenseGate>
-    </QueryClientProvider>
+    </>
   );
 }
 
@@ -162,6 +163,6 @@ function AppShell() {
           ))}
         </div>
       </nav>
-    </QueryClientProvider>
+    </>
   );
 }
