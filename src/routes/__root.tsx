@@ -116,7 +116,7 @@ function RootComponent() {
       <LicenseGate>
         <AppShell />
       </LicenseGate>
-    </>
+    </QueryClientProvider>
   );
 }
 
