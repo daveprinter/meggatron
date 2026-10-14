@@ -47,6 +47,10 @@ export interface Settings {
   marketMode: "auto" | "manual";
   marketMaxTrades: number;
   marketMaxHours: number;
+  switcher: boolean; // Market Switcher: rotate through selected markets in order
+  switchOn: "runs" | "periods";
+  switchRuns: number;
+  switchPeriods: number;
   contracts: Record<ContractKey, ContractCfg>;
   tradeMode: "auto" | "manual";
   typeMaxTrades: number;
@@ -110,6 +114,10 @@ export const defaultSettings: Settings = {
   marketMode: "auto",
   marketMaxTrades: 20,
   marketMaxHours: 30,
+  switcher: false,
+  switchOn: "runs",
+  switchRuns: 3,
+  switchPeriods: 1,
   contracts: {
     EVEN: cc(),
     ODD: cc(),

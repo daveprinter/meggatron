@@ -216,6 +216,7 @@ let lastStake = 0;
 let lastType: ContractKey | null = null;
 let marketStartedAt = Date.now();
 let marketTrades = 0;
+let periodsOnMarket = 0;
 let consecLosses = 0;
 let consecErrors = 0;
 let cooldownUntil = 0;
@@ -229,7 +230,7 @@ function saveRuntime() {
     runtime: {
       hourStart, curHour, hourProfit, targetLogged, hourTypeTrades, hourTypeLosses,
       bannedTypes: [...bannedTypes], mgStep, lossAccum, lastStake, lastType,
-      marketStartedAt, marketTrades, consecLosses, cooldownUntil, savedAt: Date.now(),
+      marketStartedAt, marketTrades, periodsOnMarket, consecLosses, cooldownUntil, savedAt: Date.now(),
     },
   }));
 }
@@ -242,6 +243,7 @@ function restoreRuntime() {
   bannedTypes = new Set(r["bannedTypes"] ?? []); mgStep = r["mgStep"] ?? 0; lossAccum = r["lossAccum"] ?? 0;
   lastStake = r["lastStake"] ?? 0; lastType = r["lastType"] ?? null; marketStartedAt = r["marketStartedAt"] ?? Date.now();
   marketTrades = r["marketTrades"] ?? 0; consecLosses = r["consecLosses"] ?? 0; cooldownUntil = r["cooldownUntil"] ?? 0;
+  periodsOnMarket = r["periodsOnMarket"] ?? 0;
   eng({ hourProfit, cooldownUntil: cooldownUntil || null });
   return true;
 }
@@ -341,7 +343,10 @@ async function tickLoop() {
   if (!hourStart) hourStart = now;
   const hk = Math.floor((now - hourStart) / periodMs(st0()));
   if (hk !== curHour) {
-    if (curHour !== -1) addLog("New period — target reset");
+    if (curHour !== -1) {
+      addLog("New period — target reset");
+      periodsOnMarket += Math.max(1, hk - curHour);
+    }
     curHour = hk;
     hourProfit = 0;
     targetLogged = false;
@@ -419,7 +424,7 @@ function findSignal(): { symbol: string; cands: Signal[] } | null {
     const cands = noAnalysisSignals().filter(eligible);
     return cands.length ? { symbol: m, cands } : null;
   }
-  const auto = st.multiMarket && st.marketMode === "auto";
+  const auto = st.multiMarket && st.marketMode === "auto" && !st.switcher;
   const markets = auto ? activeMarkets() : [getState().engine.market];
   let best: { symbol: string; cands: Signal[]; edge: number } | null = null;
   for (const m of markets) {
@@ -472,6 +477,27 @@ function maybeSwitchMarket() {
   const cur = getState().engine.market;
   if (markets.length < 2) {
     if (cur !== markets[0]) eng({ market: markets[0]! });
+    return;
+  }
+  if (st.switcher) {
+    if (!markets.includes(cur)) {
+      eng({ market: markets[0]! });
+      marketTrades = 0;
+      periodsOnMarket = 0;
+      return;
+    }
+    let why = "";
+    if (st.switchOn === "runs" && marketTrades >= Math.max(1, st.switchRuns)) why = `${marketTrades} runs done`;
+    if (st.switchOn === "periods" && periodsOnMarket >= Math.max(1, st.switchPeriods)) why = `${periodsOnMarket} period(s) done`;
+    if (why) {
+      const next = markets[(markets.indexOf(cur) + 1) % markets.length]!;
+      marketTrades = 0;
+      periodsOnMarket = 0;
+      marketStartedAt = Date.now();
+      eng({ market: next });
+      addLog(`Market Switcher: ${marketName(cur)} → ${marketName(next)} (${why})`);
+      saveRuntime();
+    }
     return;
   }
   if (st.marketMode !== "manual") {

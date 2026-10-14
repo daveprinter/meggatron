@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { NumField, Panel, Segmented } from "@/components/kit";
+import { NumField, Panel, Segmented, Toggle } from "@/components/kit";
 import { connectAccount, disconnectAccount, launchEngine, stopEngine, watchMarket } from "@/lib/engine";
 import {
   CONTRACTS,
@@ -124,20 +124,56 @@ function Home() {
             <div className="grid grid-cols-2 gap-2">
               {MARKETS.map((m) => {
                 const on = s.markets.includes(m.symbol);
+                const order = s.markets.indexOf(m.symbol) + 1;
                 return (
                   <button
                     key={m.symbol}
-                    className={cn("chip text-left text-xs", on && "chip-on")}
+                    className={cn("chip relative text-left text-xs", on && "chip-on")}
                     onClick={() =>
                       updateSettings({ markets: on ? s.markets.filter((x) => x !== m.symbol) : [...s.markets, m.symbol] })
                     }
                   >
-                    <div>{m.name}</div>
+                    {on && (
+                      <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                        {order}
+                      </span>
+                    )}
+                    <div className="pr-6">{m.name}</div>
                     {on && <MarketPrice symbol={m.symbol} />}
                   </button>
                 );
               })}
             </div>
+            <div className="rounded-lg border p-3">
+              <Toggle label="Market Switcher" checked={s.switcher} onChange={(b) => updateSettings({ switcher: b })} />
+              {s.switcher && (
+                <div className="mt-3 space-y-3">
+                  <label className="block">
+                    <span className="field-label">Switch to next market</span>
+                    <select
+                      className="input"
+                      value={s.switchOn}
+                      onChange={(e) => updateSettings({ switchOn: e.target.value as "runs" | "periods" })}
+                    >
+                      <option value="runs">After X number of runs</option>
+                      <option value="periods">Switch per period</option>
+                    </select>
+                  </label>
+                  {s.switchOn === "runs" ? (
+                    <NumField label="Runs per market" value={s.switchRuns} min={1} onChange={(n) => updateSettings({ switchRuns: Math.max(1, Math.round(n)) })} />
+                  ) : (
+                    <NumField label="Switch after how many periods" value={s.switchPeriods} min={1} onChange={(n) => updateSettings({ switchPeriods: Math.max(1, Math.round(n)) })} />
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Follows the numbered order above (1 → 2 → 3 …), then starts again from 1.{" "}
+                    {s.switchOn === "runs"
+                      ? `Moves on after every ${s.switchRuns} trade(s), even inside the same period.`
+                      : `Uses each market for ${s.switchPeriods} period(s), then moves on at the next period.`}
+                  </p>
+                </div>
+              )}
+            </div>
+            {!s.switcher && (
             <div>
               <span className="field-label">Switching mode</span>
               <Segmented
@@ -149,7 +185,8 @@ function Home() {
                 onChange={(v) => updateSettings({ marketMode: v })}
               />
             </div>
-            {s.marketMode === "manual" ? (
+            )}
+            {s.switcher ? null : s.marketMode === "manual" ? (
               <div className="grid grid-cols-2 gap-3">
                 <NumField label="Max trades per market" value={s.marketMaxTrades} onChange={(n) => updateSettings({ marketMaxTrades: n })} />
                 <NumField label="Max hours per market" value={s.marketMaxHours} onChange={(n) => updateSettings({ marketMaxHours: n })} />
