@@ -15,6 +15,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { getState, hydrate, nairobiTime, useApp } from "../lib/store";
 import { connectAccount, resumeIfLaunched, startFeed } from "../lib/engine";
 import { startPayoutScanner } from "../lib/payouts";
+import { LicenseGate } from "../components/LicenseGate";
 
 function NotFoundComponent() {
   return (
@@ -110,6 +111,16 @@ function Clock() {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  return (
+    <QueryClientProvider client={queryClient}>
+      <LicenseGate>
+        <AppShell />
+      </LicenseGate>
+    </QueryClientProvider>
+  );
+}
+
+function AppShell() {
   const launched = useApp((s) => s.session.launched);
   const conn = useApp((s) => s.conn.status);
 
@@ -122,7 +133,7 @@ function RootComponent() {
 
   const tab = "flex flex-1 flex-col items-center gap-0.5 py-2.5 text-xs font-semibold text-muted-foreground";
   return (
-    <QueryClientProvider client={queryClient}>
+    <>
       <div className="mx-auto min-h-screen max-w-2xl pb-24">
         <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/90 px-4 py-3 backdrop-blur">
           <div className="flex items-center gap-2">
@@ -152,6 +163,6 @@ function RootComponent() {
           ))}
         </div>
       </nav>
-    </QueryClientProvider>
+    </>
   );
 }
