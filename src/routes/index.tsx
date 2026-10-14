@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { NumField, Panel, Segmented } from "@/components/kit";
+import { NumField, Panel, Segmented, Toggle } from "@/components/kit";
 import { connectAccount, disconnectAccount, launchEngine, stopEngine, watchMarket } from "@/lib/engine";
 import {
   CONTRACTS,
